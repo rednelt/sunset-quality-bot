@@ -16,34 +16,27 @@ from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKey
 # To be attached to the dispatcher
 router = Router()
 
-# Use FSM for the registration sequence
-class Registration(StatesGroup):
-    waiting_for_location = State()
-
 
 @router.message(CommandStart())
 async def start(message: Message, state: FSMContext):
-    # Create a keyboard with a location request button
-    kb = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📍 Share Location", request_location=True)]],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-    
-    await message.answer("Hello! This bot can fetch sunset/sunrise quality predictions from " 
-        "sunsethue.com for your location. Send a location to begin (press button to share your "
-        "location or drop a pin manually)", reply_markup=kb)
-    
-    # Switch user to the waiting state
-    await state.set_state(Registration.waiting_for_location)
+    await message.answer("Hello! This bot can fetch sunset/sunrise quality predictions from " \
+        "sunsethue.com for your location. Send a location to begin, no need for an exact one" \
+        "as the API's resolution is 0.5x0.5 degrees as of now. You can just send a location at " \
+        "any time to update it.")
 
 
-@router.message(Registration.waiting_for_location, F.location)
-async def handle_location(message: Message, state: FSMContext):
+@router.message(F.location)
+async def handle_location(message: Message):
     lat = message.location.latitude
     lon = message.location.longitude
     chat_id = message.from_user.id
     username = message.from_user.username
+
+    # Latitudes not in this range aren't supported by sunsethue
+    if not (-55 <= lat <= 70):
+        message.answer("Sunsethue only supports latitudes between -55 and 70. Sorry.")
+        return
+
 
     # Save to database using UPSERT
     async with aiosqlite.connect("users.sqlite") as db:
@@ -57,14 +50,8 @@ async def handle_location(message: Message, state: FSMContext):
         """, (chat_id, username, lat, lon))
         await db.commit()
 
-    await message.answer(f"Saved! Location: {lat}, {lon}", reply_markup=ReplyKeyboardRemove())
-    await state.clear()
-
-
-# Error handler
-@router.message(Registration.waiting_for_location)
-async def invalid_location(message: Message):
-    await message.answer("That wasn't a location. Please use the button or drop a pin.")
+    await message.answer(f"Saved! Location: {lat}, {lon}. You can now use /sunset and /sunrise. " \
+        "Update anytime by dropping another pin.")
 
 
 @router.message(Command("sunset"))
