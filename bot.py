@@ -13,9 +13,9 @@ import handlers
 async def setup_bot_commands(bot: Bot):
     commands = [
         BotCommand(command="start", description="Display welcome message, ask to send location"),
-        BotCommand(command="help", description="Get help"),
         BotCommand(command="sunset", description="Return the forecast for the next sunset"),
-        BotCommand(command="sunrise", description="Return the forecast for the next sunrise")
+        BotCommand(command="sunrise", description="Return the forecast for the next sunrise"),
+        BotCommand(command="help", description="Get help")
     ]
 
     await bot.set_my_commands(commands)
