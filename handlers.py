@@ -10,34 +10,31 @@ import datetime
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, Command
 from aiogram.filters.callback_data import CallbackData
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import Message, InlineKeyboardButton, CallbackQuery
 
 from format_forecast import format_forecast
+
 
 # To be attached to the dispatcher
 router = Router()
 
-
 @router.message(CommandStart())
 async def start(message: Message):
-    await message.answer("Hello! This bot can fetch sunset/sunrise quality predictions from " \
-        "sunsethue.com for your location, for up to 2 days into the future (accuracy not guaranteed). " \
-        "Send a location to begin, no need for an exact one as the API's resolution is 0.5x0.5 degrees as " \
-        "of now. You can just send a location at any time to update it.")
+    await message.answer("Hello! This bot can fetch sunset/sunrise quality predictions from sunsethue.com for your location, "
+    "for up to 3 days into the future. Send a location to begin.")
     
 @router.message(Command("help"))
 async def help(message: Message):
-    await message.answer("This bot can fetch sunset or sunrise quality predictions for your location from sunsethue.com. " \
-        "Just drop a location to start. Probably don't use your exact one, the API operates in 0.5x0.5deg squares (~55km) " \
-        "anyway. \n\n/start - Display welcome message\n/sunrise and /sunset - send a message with buttons to select the date " \
-        "(today, tomorrow, the date after tomorrow), then send a formatted forecast.\n/help - Display this message")
+    await message.answer("This bot can fetch sunset or sunrise quality predictions for your location from sunsethue.com. "
+        "Just drop a location to start. Probably don't use your exact one, the API operates in 0.5x0.5deg squares (~55km) "
+        "anyway. The accuracy <i>will</i> deteoriate the further into the future you look, keep that in mind."
+        "\n\n/start - Display welcome message\n/sunrise and /sunset - send a message with buttons to select the date "
+        "(today, tomorrow, the day after tomorrow), then send a formatted forecast.\n/help - Display this message")
 
 
 @router.message(F.location)
-async def handle_location(message: Message):
+async def location(message: Message, db: aiosqlite.Connection):
     lat = message.location.latitude
     lon = message.location.longitude
     chat_id = message.from_user.id
@@ -48,20 +45,18 @@ async def handle_location(message: Message):
         await message.answer("Sunsethue only supports latitudes between -55 and 70. Sorry.")
         return
 
-
     # Save to database using UPSERT
-    async with aiosqlite.connect("users.sqlite") as db:
-        await db.execute("""
+    await db.execute("""
             INSERT INTO Users (chat_id, username, lat, lon) 
             VALUES (?, ?, ?, ?)
             ON CONFLICT(chat_id) DO UPDATE SET
-                username = excluded.username,
-                lat = excluded.lat,
-                lon = excluded.lon
+            username = excluded.username,
+            lat = excluded.lat,
+            lon = excluded.lon
         """, (chat_id, username, lat, lon))
-        await db.commit()
+    await db.commit()
 
-    await message.answer(f"Saved! Location: {lat}, {lon}. You can now use /sunset and /sunrise. " \
+    await message.answer(f"Saved! Location: {lat}, {lon}. You can now use /sunset and /sunrise. "
         "Update anytime by dropping another pin.")
 
 class ForecastRequest(CallbackData, prefix="forecast"):
@@ -72,14 +67,13 @@ class ForecastRequest(CallbackData, prefix="forecast"):
     timezone_name: str
 
 @router.message(Command("sunset", "sunrise"))
-async def sunset_sunrise(message: Message, bot: Bot):
+async def sunset_sunrise(message: Message, bot: Bot, db: aiosqlite.Connection):
     await bot.send_chat_action(message.chat.id, "typing")
 
     # Get the user's latitude/longitude.
-    async with aiosqlite.connect("users.sqlite") as db:
-        chat_id = message.chat.id
-        cursor = await db.execute(f"SELECT lat, lon FROM Users WHERE chat_id = {chat_id}") 
-        coordinates = await cursor.fetchone()
+    chat_id = message.chat.id
+    cursor = await db.execute("SELECT lat, lon FROM Users WHERE chat_id = ?", (chat_id,)) 
+    coordinates = await cursor.fetchone()
     
     if not coordinates:
         await message.answer("It seems you haven't registered yet. Register using the /start command.")
@@ -99,8 +93,6 @@ async def sunset_sunrise(message: Message, bot: Bot):
     kb_builder = InlineKeyboardBuilder()
     for i in range(3):
         shifted_datetime = user_datetime + datetime.timedelta(days=i)
-        # debug
-        print("Shifted datetime:", str(shifted_datetime.date()))
         kb_builder.add(
             InlineKeyboardButton(
                 text=shifted_datetime.strftime("%a %d.%m"),
@@ -116,13 +108,10 @@ async def sunset_sunrise(message: Message, bot: Bot):
     await message.answer(f"Select {type} time:", reply_markup=kb_builder.as_markup())
         
 @router.callback_query(ForecastRequest.filter())
-async def forecast(callback_query: CallbackQuery, callback_data: ForecastRequest, bot: Bot):
+async def forecast(callback_query: CallbackQuery, callback_data: ForecastRequest, bot: Bot, API_KEY: str, session: aiohttp.ClientSession):
     await bot.send_chat_action(chat_id=callback_query.message.chat.id, action="typing")
     await callback_query.message.edit_reply_markup(None)
     await callback_query.message.edit_text("Fetching...")
-
-    with open("api_key.txt", "r") as f:
-        API_KEY = f.read()
     
     lat = callback_data.lat
     lon = callback_data.lon
@@ -131,15 +120,14 @@ async def forecast(callback_query: CallbackQuery, callback_data: ForecastRequest
     timezone_name = callback_data.timezone_name
 
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(10)) as session:
-            async with session.get(f"https://api.sunsethue.com/event?key={API_KEY}&latitude={lat}&longitude={lon}&date={date}&type={type}") as response:
-                if response.status != 200:
-                    callback_query.answer()
-                    callback_query.message.answer(f"Couldn't fetch. API returned {response.status}")
-                    callback_query.message.delete()
-                    return None
-                    
-                response_json = await response.text()
+        async with session.get(f"https://api.sunsethue.com/event?key={API_KEY}&latitude={lat}&longitude={lon}&date={date}&type={type}") as response:
+            if response.status != 200:
+                callback_query.answer()
+                callback_query.message.answer(f"Couldn't fetch. API returned {response.status}")
+                callback_query.message.delete()
+                return None
+                
+            response_json = await response.text()
 
     except aiohttp.ConnectionTimeoutError:
         callback_query.answer()
@@ -147,9 +135,6 @@ async def forecast(callback_query: CallbackQuery, callback_data: ForecastRequest
         callback_query.message.delete()
         return None
 
-    # TODO: Format data instead of this
-
-    print(json.dumps(response_json, indent=2))
     await callback_query.answer()
     await callback_query.message.answer(format_forecast(response_json, timezone_name))
     await callback_query.message.delete()

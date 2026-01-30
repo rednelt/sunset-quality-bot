@@ -28,7 +28,8 @@ def format_forecast(response_text, timezone_name):
         f"{iso_to_local_dt(response_json["data"]["magics"]["blue_hour"][1], timezone_name).strftime("%H:%M")}"
     
 
-    return f"""{title}
+    return f"""
+{title}
 {"─" * 26}
 📸 Quality: {quality}
 🌥️ Cloud cover: {cloud_cover}
@@ -37,6 +38,7 @@ def format_forecast(response_text, timezone_name):
 🧭 Direction: {direction}
 
 🟧 Golden hour: {golden_hour}
-🟦 Blue hour: {blue_hour}"""
+🟦 Blue hour: {blue_hour}
+"""
     
     
