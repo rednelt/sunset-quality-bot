@@ -48,7 +48,8 @@ async def main() -> None:
                     chat_id INTEGER PRIMARY KEY,
                     username TEXT,
                     lat REAL NOT NULL CHECK (lat >= -55.0 AND lat <= 70.0),
-                    lon REAL NOT NULL CHECK (lon >= -180.0 AND lon <= 180.0)
+                    lon REAL NOT NULL CHECK (lon >= -180.0 AND lon <= 180.0),
+                    timezone TEXT NOT NULL
                 )
             """)
             await db.commit()
