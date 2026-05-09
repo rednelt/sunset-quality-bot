@@ -4,14 +4,14 @@ import os
 import sys
 
 import aiohttp
-import aiosqlite
-from aiogram import Bot, Dispatcher
+from aiogram import BaseMiddleware, Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand
+from aiogram.types import BotCommand, TelegramObject
 from dotenv import load_dotenv
 
 import handlers
+from database import Base, async_session, engine
 
 
 async def setup_bot_commands(bot: Bot):
@@ -27,56 +27,43 @@ async def setup_bot_commands(bot: Bot):
     await bot.set_my_commands(commands)
 
 
+class DatabaseMiddleware(BaseMiddleware):
+    def __init__(self, http_session: aiohttp.ClientSession):
+        super().__init__()
+        self.http_session = http_session
+
+    async def __call__(self, handler, event: TelegramObject, data: dict):
+        async with async_session() as db_session:
+            data["db"] = db_session
+            data["session"] = self.http_session
+            return await handler(event, data)
+
+
 async def main() -> None:
     load_dotenv()
 
-    # Read bot token
     BOT_TOKEN = os.getenv("BOT_TOKEN")
-    # Read API key
     API_KEY = os.getenv("API_KEY")
     if not BOT_TOKEN or not API_KEY:
         logging.error(
-            "Failed reading one or more required environment variables. Please set BOT_TOKEN and API_KEY in the .env file."
+            "Couldn't get the required environment variables. Please set BOT_TOKEN and API_KEY in the .env file."
         )
         return
 
-    # Ensure the database exists
-    async with aiosqlite.connect("users.sqlite") as db:
-        async with aiohttp.ClientSession() as session:
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS Users (
-                    chat_id INTEGER PRIMARY KEY,
-                    username TEXT,
-                    lat REAL NOT NULL CHECK (lat >= -55.0 AND lat <= 70.0),
-                    lon REAL NOT NULL CHECK (lon >= -180.0 AND lon <= 180.0),
-                    timezone TEXT NOT NULL
-                )
-            """)
-            await db.commit()
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
-            # Database and aiohttp connection middleware. We will pass it to all handlers
-            async def dependencies_middleware(handler, event, data):
-                data["db"] = db
-                data["session"] = session
-                return await handler(event, data)
+    async with aiohttp.ClientSession() as http_session:
+        dp = Dispatcher(API_KEY=API_KEY)
+        dp.include_routers(handlers.router)
+        dp.update.outer_middleware.register(DatabaseMiddleware(http_session))
 
-            # Initialize the dispatcher and attach our router to it. We only pass the API key
-            # into the dispatcher as we don't need the bot token after we initialize the bot
-            dp = Dispatcher(API_KEY=API_KEY)
-            dp.include_routers(handlers.router)
+        bot = Bot(
+            token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        )
 
-            # Register middleware
-            dp.update.outer_middleware.register(dependencies_middleware)
-
-            # Initialize the bot and start polling
-            bot = Bot(
-                token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-            )
-
-            dp.startup.register(setup_bot_commands)
-            await dp.start_polling(
-                bot, skip_updates=True, on_startup=setup_bot_commands
-            )
+        dp.startup.register(setup_bot_commands)
+        await dp.start_polling(bot, skip_updates=True)
 
 
 if __name__ == "__main__":
