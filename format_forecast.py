@@ -1,3 +1,4 @@
+import datetime
 from zoneinfo import ZoneInfo
 
 from schemas import ForecastResponse
@@ -18,6 +19,32 @@ def format_forecast(forecast_response: ForecastResponse, timezone_name: str) -> 
         cloud_cover = "Also unavailable. Try again in a couple of hours."
 
     direction = f"{data.direction}°"
+
+    # Fix for API issue where it doesn't return blue/golden hour start/end times
+    if not data.magics.golden_hour[0]:
+        data.magics.golden_hour[0] = (
+            datetime.datetime.now()
+            .astimezone(ZoneInfo(timezone_name))
+            .replace(hour=0, minute=0)
+        )
+    if not data.magics.golden_hour[1]:
+        data.magics.golden_hour[1] = (
+            datetime.datetime.now()
+            .astimezone(ZoneInfo(timezone_name))
+            .replace(hour=23, minute=59)
+        )
+    if not data.magics.blue_hour[0]:
+        data.magics.blue_hour[0] = (
+            datetime.datetime.now()
+            .astimezone(ZoneInfo(timezone_name))
+            .replace(hour=0, minute=0)
+        )
+    if not data.magics.blue_hour[1]:
+        data.magics.blue_hour[1] = (
+            datetime.datetime.now()
+            .astimezone(ZoneInfo(timezone_name))
+            .replace(hour=23, minute=59)
+        )
 
     gh_start = data.magics.golden_hour[0].astimezone(ZoneInfo(timezone_name))
     gh_end = data.magics.golden_hour[1].astimezone(ZoneInfo(timezone_name))

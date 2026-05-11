@@ -1,4 +1,5 @@
 import datetime
+import pprint
 import zoneinfo
 
 import aiohttp
@@ -165,6 +166,8 @@ async def forecast(
                 return
 
             response_json = await response.json()
+            # pprint.pprint(response_json)
+
             # Validate with Pydantic
             forecast_data = ForecastResponse.model_validate(response_json)
 

@@ -5,8 +5,10 @@ from pydantic import BaseModel
 
 
 class Magics(BaseModel):
-    golden_hour: List[datetime]
-    blue_hour: List[datetime]
+    golden_hour: List[
+        datetime | None
+    ]  # sometimes the API returns None, due to reasons not known to me. tested in Greenland
+    blue_hour: List[datetime | None]
 
 
 class ForecastData(BaseModel):
