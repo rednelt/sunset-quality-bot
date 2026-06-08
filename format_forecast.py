@@ -56,7 +56,7 @@ def format_forecast(forecast_response: ForecastResponse, timezone_name: str) -> 
 
     return f"""
 {title}
-{"─" * 26}
+
 📸 Quality: {quality}
 🌥️ Cloud cover: {cloud_cover}
 
